@@ -6,34 +6,40 @@ import javax.servlet.annotation.WebServlet;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
-import javax.servlet.http.HttpSession;
 
 import com.DAO.PostDAO;
-import com.Db.DBConnect;
+import com.User.UserDetails;
+import com.util.WebUtils;
 
+/**
+ * Deletes a note the signed-in user owns.
+ *
+ * <p>POST only. This was a GET link taking just a note id, so it could delete
+ * any user's note by number and could be triggered from any other site.
+ */
 @WebServlet("/deleteServlet")
 public class deleteServlet extends HttpServlet {
 
-    // Override doGet method to handle GET requests
-    protected void doGet(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
-        // Retrieve the note ID from the request parameter
-        Integer noteid = Integer.parseInt(request.getParameter("note_id")); // Note ID to be deleted
+    private static final long serialVersionUID = 1L;
 
-        // Create an instance of PostDAO to interact with the database
-        PostDAO dao = new PostDAO(DBConnect.getconn());
-        // Attempt to delete the note with the specified ID
-        boolean f = dao.DeleteNotes(noteid);
-        HttpSession session = null; // Declare session variable
+    @Override
+    protected void doPost(HttpServletRequest request, HttpServletResponse response)
+            throws ServletException, IOException {
 
-        // Check if the deletion was successful
-        if (f) {
-            session = request.getSession(); // Create or retrieve the current session
-            session.setAttribute("updateMsg", "Notes Deleted Successfully..."); // Set success message
-            response.sendRedirect("showNotes.jsp"); // Redirect to the notes display page
-        } else {
-            session = request.getSession(); // Create or retrieve the current session
-            session.setAttribute("wrongMsg", "Something Went Wrong"); // Set error message
-            response.sendRedirect("showNotes.jsp"); // Redirect to the notes display page
+        UserDetails user = WebUtils.currentUser(request);
+        if (user == null) {
+            response.sendRedirect("login.jsp");
+            return;
         }
+
+        int noteId = WebUtils.intParam(request, "note_id", -1);
+
+        if (noteId >= 1 && new PostDAO().deleteNote(noteId, user.getId())) {
+            WebUtils.success(request, "Note deleted.");
+        } else {
+            WebUtils.error(request, "That note could not be found.");
+        }
+
+        response.sendRedirect("showNotes.jsp");
     }
 }
