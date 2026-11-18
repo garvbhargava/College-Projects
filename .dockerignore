@@ -15,6 +15,7 @@ server/.env
 .vscode
 *.md
 *.txt
+Documentation
 
 npm-debug.log*
 Thumbs.db

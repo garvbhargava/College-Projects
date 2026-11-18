@@ -241,10 +241,24 @@ frontend/                     React single-page app (Vite)
   src/components/, src/pages/   UI
 
 db/schema.sql                 Reference schema for a fresh database
+Documentation/                Specifications (PDF)
 docker-compose.yml            App + MySQL stack
 Dockerfile                    Multi-stage build (Vite → Express runtime)
 package.json                  Root scripts that drive both halves
 ```
+
+---
+
+## 📚 Documentation
+
+Four specifications, written from the code on this branch, are in [`Documentation/`](Documentation/):
+
+| Document | Covers |
+|---|---|
+| [Architecture](Documentation/Architecture.pdf) | System context, tiers, data model, security, deployment and design decisions |
+| [Backend Specification](Documentation/Backend%20Specification.pdf) | Configuration, request pipeline, sessions and CSRF, all 17 endpoints, registration codes, data access, email |
+| [Frontend Specification](Documentation/Frontend%20Specification.pdf) | Routes and guards, every screen and its states, the design system, phone layouts |
+| [Working Module](Documentation/Working%20Module.pdf) | Each module step by step with worked examples, an end-to-end walkthrough, troubleshooting |
 
 ---
 
