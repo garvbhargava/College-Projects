@@ -17,9 +17,9 @@ Coursework projects. Each one lives on its own branch, so its code, history and 
 Use the branch dropdown above the file list, or clone and check one out:
 
 ```bash
-git clone https://github.com/garv503/College-Projects.git
+git clone https://github.com/garvbhargava/College-Projects.git
 cd College-Projects
 git checkout Student-Analytics
 ```
 
-Every branch carries its own README with full setup and run instructions.
+Every branch carries its own README with full setup and run instructions, and a `Documentation/` folder with four specifications (PDF): Architecture, Backend Specification, Frontend Specification and Working Module.
