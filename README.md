@@ -132,7 +132,7 @@ The app ports differ, so a terminal run and a Docker run can be up simultaneousl
 | App | `localhost:3000` | `localhost:3001` |
 | Database | `localhost:3306` | the same `localhost:3306` |
 
-Because both talk to one database, an account created or a note written on either port is immediately visible on the other. Change the Docker port with `APP_PORT` in the root `.env`.
+Because both talk to one database, an account created or a note written on either port is immediately visible on the other. In one browser, though, the two runs share the cookie `inkwell.sid` (browsers keep cookies per host, not per port), so signing in on one port — or even just opening the app there — signs you out of the other; use a separate browser or profile for each. Change the Docker port with `APP_PORT` in the root `.env`.
 
 ---
 
@@ -144,7 +144,7 @@ Terminal runs read `server/.env` ([`server/.env.example`](server/.env.example));
 |---|---|---|
 | `PORT` | `3000` | Port Express listens on *inside* its process/container |
 | `APP_URL` | `http://localhost:$PORT` | Absolute base URL this instance is reached at |
-| `DB_HOST` / `DB_PORT` | `localhost` / `3306` | MySQL connection (Docker: `db` / `3306`, set automatically) |
+| `DB_HOST` / `DB_PORT` | `localhost` / `3306` | MySQL connection (Docker: `host.docker.internal` / `3306`, set automatically) |
 | `DB_USER` / `DB_PASSWORD` / `DB_NAME` | `root` / — / `enotes` | MySQL credentials |
 | `SESSION_SECRET` | dev fallback | Signs the session cookie — **set a long random value before deploying** |
 | `COOKIE_SECURE` | on when `NODE_ENV=production` | Marks the session cookie HTTPS-only. Must be `false` over plain HTTP, or sign-in silently never sticks |
@@ -155,7 +155,7 @@ Run `npm run check` (terminal) or `docker compose exec app node src/check-config
 
 ## 📡 API Reference
 
-All endpoints return JSON. Auth is a session cookie; every write additionally requires the session's CSRF token in an `X-CSRF-Token` header.
+All endpoints return JSON. Auth is a session cookie; every write except sign-in (`/api/auth/login`) and the first registration step (`/api/auth/register`) additionally requires the session's CSRF token in an `X-CSRF-Token` header.
 
 <details>
 <summary><strong>Full endpoint list</strong></summary>
@@ -185,7 +185,7 @@ PATCH  /api/admin/users/{id}/role     set USER or ADMIN        (ADMIN)
 DELETE /api/admin/users/{id}          delete an account        (ADMIN)
 ```
 
-Status codes: `401` not signed in · `403` signed in but not permitted (including a missing/wrong CSRF token) · `404` for a note that doesn't exist *or* belongs to someone else (deliberately indistinguishable) · `400` validation failure · `409` duplicate email.
+Status codes: `401` not signed in · `403` signed in but not permitted, or a missing/wrong CSRF token (checked before sign-in, so it applies even when signed out) · `404` for a note that doesn't exist *or* belongs to someone else (deliberately indistinguishable) · `400` validation failure · `409` duplicate email.
 
 </details>
 
@@ -193,12 +193,12 @@ Status codes: `401` not signed in · `403` signed in but not permitted (includin
 
 ## 👤 Roles
 
-Each account is `USER` or `ADMIN`. The **first account ever registered becomes ADMIN**; everyone after is `USER`. Two rules make lockout impossible, enforced server-side:
+Each account is `USER` or `ADMIN`. The **first account ever registered becomes ADMIN**; everyone after is `USER`. Two rules guard against lockout, enforced server-side:
 
 - An admin cannot change their own role
 - An admin cannot delete their own account
 
-Together these guarantee at least one administrator always remains.
+So no single request can remove the last administrator. Two admins demoting or deleting each other at the same instant could both succeed, though; if the database is ever left with no admin, the next startup promotes the oldest account.
 
 ---
 
@@ -212,11 +212,11 @@ Everything else is enforced:
 - Every note query is scoped by owner id — a note can't be read, edited, or deleted by anyone but its author
 - The API is the authorization boundary (Express middleware on `/api`), not the React route guards, which are convenience only
 - Authorization is re-read from the database on every request — a deleted account's session stops working immediately
-- Every state-changing request requires a valid per-session CSRF token
-- Sign-in regenerates the session id (session-fixation defence); the cookie is `HttpOnly`, `SameSite=Lax`, and `Secure` automatically once `NODE_ENV=production`
+- Every state-changing request requires a valid per-session CSRF token, except sign-in and the first registration step (`/api/auth/login`, `/api/auth/register`)
+- Sign-in regenerates the session id (session-fixation defence); the cookie is `HttpOnly`, `SameSite=Lax`, and `Secure` when `COOKIE_SECURE=true` (if `COOKIE_SECURE` is unset, only when `NODE_ENV=production`; `docker-compose.yml` sets it to `false` by default because the container is reached over plain HTTP)
 - Every SQL statement uses bound parameters; `LIKE` wildcards in search terms are escaped
 - Sign-in failures give one identical message for every cause, so responses can't be used to enumerate accounts
-- Registration codes are generated with `crypto.randomInt`, compared in constant time, single-use, expire in 10 minutes, and are burned after 5 wrong guesses — a 6-digit code is otherwise only a million tries from being brute-forced
+- Registration codes are generated with `crypto.randomInt`, compared in constant time, single-use, expire in 10 minutes, and are burned after 5 wrong guesses — a 6-digit code is otherwise only a million tries from being brute-forced. That limit holds for guesses sent one at a time: the counter is read and incremented in separate statements, so simultaneous guesses are not all counted in time
 - An unconfirmed signup lives in `pending_registration`, never in `user`, so an unverified address never becomes an account or squats an email someone else may be entitled to register
 
 ---
@@ -228,7 +228,7 @@ server/                       Node + Express API and static host
   src/index.js                 App bootstrap, middleware order, startup
   src/config.js                Environment configuration
   src/db.js                    MySQL connection pool
-  src/schema.js                Creates/upgrades the schema at startup
+  src/schema.js                Creates missing tables at startup (no upgrades)
   src/userView.js               The user shape sent to the client
   src/middleware/security.js    CSRF, requireAuth, requireAdmin
   src/routes/                   auth.js, notes.js, stats.js, admin.js
@@ -242,7 +242,7 @@ frontend/                     React single-page app (Vite)
 
 db/schema.sql                 Reference schema for a fresh database
 Documentation/                Specifications (PDF)
-docker-compose.yml            App + MySQL stack
+docker-compose.yml            App container only (MySQL stays on the host)
 Dockerfile                    Multi-stage build (Vite → Express runtime)
 package.json                  Root scripts that drive both halves
 ```
@@ -267,7 +267,7 @@ Four specifications, written from the code on this branch, are in [`Documentatio
 | Symptom | Cause |
 |---|---|
 | `ECONNREFUSED` or schema warnings at startup | MySQL isn't running, or the credentials in `server/.env` / root `.env` are wrong. The server still starts so it can report the problem clearly |
-| Blank page, or 404s for `/assets/*` | Front end hasn't been built — run `npm run build`, or use `npm start` |
+| Every page shows `{"error":"Something went wrong. Please try again."}` (HTTP 500), and the server log says "The React build is missing…" | Front end hasn't been built — run `npm run build`, or use `npm start` |
 | `EADDRINUSE: address already in use` | Something else holds the port — stop it, or change `PORT` (terminal) / `APP_PORT` (Docker) |
 | "Invalid or missing security token" | Session expired — reload and try again |
 | Locked out of the admin console | No account has `ADMIN`. Run `UPDATE user SET role = 'ADMIN' WHERE email = '...';`, then restart |

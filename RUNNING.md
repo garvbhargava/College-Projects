@@ -2,7 +2,10 @@
 
 Two ways to run this project. **Both use the same MySQL database**, so the same
 accounts and the same notes appear either way — and both can run at once,
-because the ports differ.
+because the ports differ. In one browser, though, the two share the cookie
+`inkwell.sid` (browsers keep cookies per host, not per port), so signing in on
+one port — or even just opening the app there — signs you out of the other; use
+a separate browser or profile for each.
 
 | | Terminal | Docker |
 |---|---|---|
@@ -133,9 +136,10 @@ UPDATE user SET role = 'ADMIN' WHERE email = 'you@example.com';
 ```
 
 Restart afterwards. An admin cannot change their own role or delete their own
-account — that is deliberate, and guarantees at least one admin always
-survives. If a database somehow ends up with no admin at all, startup promotes
-the oldest account and logs that it did so.
+account — that is deliberate, and means no single request can remove the last
+admin, though two admins demoting or deleting each other at the same instant
+could both succeed. If a database somehow ends up with no admin at all, startup
+promotes the oldest account and logs that it did so.
 
 ### Resetting a password
 
@@ -173,8 +177,9 @@ MAIL_PASSWORD=your16charapppassword
 MAIL_FROM=Inkwell <you@gmail.com>
 ```
 
-Codes expire in 10 minutes, allow 5 wrong guesses, and can be resent once a
-minute. `npm run check` reports whether email is configured.
+Codes expire in 10 minutes, allow 5 wrong guesses (counted reliably only when
+they arrive one at a time), and can be resent once a minute. `npm run check`
+reports whether email is configured.
 
 ---
 
@@ -198,8 +203,10 @@ MySQL must be running on your machine and accepting connections. Test it:
 docker compose exec app node -e "require('mysql2/promise').createConnection({host:'host.docker.internal',user:'root',password:'1234',database:'enotes'}).then(()=>console.log('OK')).catch(e=>console.log(e.code))"
 ```
 
-**Blank page or 404s for `/assets/*`**
-The front end has not been built. Run `npm run build`, or use `npm start`.
+**Every page shows `{"error":"Something went wrong. Please try again."}`**
+The front end has not been built, so every non-API `GET` gets HTTP 500 and the
+server log says "The React build is missing…". Run `npm run build`, or use
+`npm start`.
 
 **Signed in, then immediately signed out**
 `COOKIE_SECURE` is `true` while you are on plain `http://`. A Secure cookie is
