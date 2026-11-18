@@ -26,7 +26,7 @@ a one-command Docker setup.
 | **[setup.txt](Foresight/setup.txt)** | Complete first-time setup, both methods, troubleshooting |
 | **[RUNNING.md](Foresight/RUNNING.md)** | Day-to-day operation: start, stop, logs, reset |
 | **[MySQL Code.txt](Foresight/MySQL%20Code.txt)** | Every SQL object in one listing |
-| **[Documentation/](Documentation/)** | Project reports (.docx) |
+| **[Documentation/](Documentation/)** | Specifications (PDF): Frontend Specification, Backend Specification, Architecture, Working Module |
 
 ---
 

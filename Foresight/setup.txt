@@ -57,7 +57,7 @@
      |                                (must stay at the repo root -
      |                                 GitHub looks nowhere else)
      |
-     +-- Documentation/               project reports (.docx)
+     +-- Documentation/               specifications (PDF)
      |
      +-- Foresight/                   <-- THE APPLICATION
            +-- backend/               Flask API, services, tests
