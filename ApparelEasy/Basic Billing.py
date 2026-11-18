@@ -23,7 +23,7 @@ amt = price - d
 gst = g/100*price
 net = amt + gst
 
-print("\t\t\t\tSHIVAM GARMENTS")
+print("\t\t\t\tAPPAREL EASY")
 print("\t\t\t\tINVOICE")
 print("*"*78)
 print("Garment Type :\t",gtype)
