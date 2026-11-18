@@ -59,6 +59,8 @@
      |
      +-- Documentation/               specifications (PDF)
      |
+     +-- README.md                    what the project is
+     |
      +-- Foresight/                   <-- THE APPLICATION
            +-- backend/               Flask API, services, tests
            +-- frontend/              HTML, CSS, JavaScript
@@ -66,7 +68,6 @@
            +-- docker-compose.yml
            +-- Dockerfile
            +-- .env.example
-           +-- README.md
            +-- RUNNING.md
            +-- setup.txt              (this file)
            +-- MySQL Code.txt         all SQL in one listing
@@ -125,7 +126,7 @@
 
  STEP 2 - Get the code
 
-       git clone https://github.com/garv503/College-Projects.git
+       git clone https://github.com/garvbhargava/College-Projects.git
        cd College-Projects
        git checkout Student-Analytics
        cd Foresight
@@ -186,7 +187,7 @@
 
  STEP 1 - Get the code
 
-       git clone https://github.com/garv503/College-Projects.git
+       git clone https://github.com/garvbhargava/College-Projects.git
        cd College-Projects
        git checkout Student-Analytics
        cd Foresight
@@ -208,7 +209,7 @@
 
        pip install -r backend/requirements.txt
 
-   Installing into a virtual environment keeps these five packages
+   Installing into a virtual environment keeps these six packages
    separate from anything else on your machine.
 
  STEP 4 - Create the database
@@ -263,7 +264,8 @@
 
  One .env file serves BOTH methods. Docker Compose reads it to fill in
  the ${...} values in docker-compose.yml, and the Python app reads it
- directly.
+ directly. Only DB_PASSWORD, DB_NAME and JWT_SECRET reach the
+ containers; every other setting below applies to Method B only.
 
  DATABASE
    DB_HOST=localhost      Used by METHOD B only. Inside a container the
@@ -303,9 +305,12 @@
  ACADEMIC RULES
    PASS_PERCENT=40             The pass mark.
    MIN_ATTENDANCE_PERCENT=75   The attendance requirement.
-                          Both feed the risk scoring, so a college with
-                          different rules changes them here rather than
-                          in the code.
+                          Only the Python risk score (the explanation on
+                          a student's dashboard) reads these. The SQL
+                          views and the risk bands use 40 and 75 as
+                          written, and Docker does not pass either
+                          setting, so a different value makes the
+                          dashboard disagree with the lists and exports.
 
  NOTE
    .env is listed in .gitignore and is never committed. .env.example is
@@ -401,7 +406,7 @@
        cd backend
        pytest
 
- Expected: 165 passed.
+ Expected: 173 passed.
 
  The suite creates its own database called foresight_test, builds it
  from the same SQL scripts the application uses, and drops it at the

@@ -5,7 +5,7 @@ Academic analytics for a college. Marks and attendance go in; a ranked,
 still time to act on it.
 
 Built with Flask, MySQL 8 and vanilla JavaScript. JWT authentication,
-role-based access control, an audited database, 165 automated tests and
+role-based access control, an audited database, 173 automated tests and
 a one-command Docker setup.
 
 ```
@@ -76,7 +76,7 @@ academic standing with suggested next steps.
 distribution, per-subject pass rates that surface which papers are
 failing people, and a list of at-risk students ranked by severity *with
 the reason for each*. Plus bulk CSV import, CSV export, student
-management and a full audit trail.
+management and an audit trail.
 
 ### Features
 
@@ -86,10 +86,10 @@ management and a full audit trail.
 | **Cohort ranking** | Class rank and percentile via SQL window functions, scoped to branch + semester |
 | **Trend detection** | Compares the first half of a term's assessments against the second to flag improving vs declining students |
 | **Class comparison** | Each subject mark against the class average — 52% reads very differently when the class average is 48% |
-| **Bulk CSV import** | Validates the entire file before writing anything; a single bad row rejects the upload with per-line errors |
+| **Bulk CSV import** | Validates the entire file before writing anything; a single bad row rejects the whole upload with per-line errors, except that a row with extra cells gives a 500 and a value only the database rejects (such as `max_marks` above 200) a 503 |
 | **Report cards** | Grades, credit-weighted GPA and rank, as JSON or a CSV download |
-| **Audit trail** | Written by database triggers, so a change made directly in a SQL client is recorded too |
-| **RBAC** | Three roles enforced on every endpoint — a student cannot read another student's records |
+| **Audit trail** | Mark changes and student edits are written by database triggers, so one made directly in a SQL client is recorded too |
+| **RBAC** | Three roles, checked on every staff and admin endpoint — a student cannot read another student's records |
 | **API docs** | Interactive Swagger UI at `/api/docs` |
 
 ---
@@ -99,8 +99,9 @@ management and a full audit trail.
 ### Request flow
 
 ```
-routes/         HTTP only — read request, check permission, return JSON
-   │            Thin by design. No business decisions live here.
+routes/         HTTP layer — read request, check permission, return JSON
+   │            Thin by design, though the sign-in, password,
+   │            student-creation and single-mark rules still live here.
    ▼
 services/       Business logic — risk scoring, CSV parsing, report building
    │            Testable without an HTTP request.
@@ -110,7 +111,8 @@ db.py           Pooled connections, parameterised queries, transactions
    ▼
 MySQL           Views compute the derived numbers.
                 Triggers enforce what must never be bypassed.
-                Procedures own the multi-table transactions.
+                Procedures run enrolment, single-mark entry and
+                promotion in their own transactions.
 ```
 
 ### Why the logic sits in SQL
@@ -120,7 +122,8 @@ the CSV export and the at-risk report each recalculated them inline, they
 would eventually disagree. Defining them once as a view means all three
 are mathematically guaranteed to match.
 
-The views build in layers, each consuming the last:
+Five of the six views build in layers, as a tree; the sixth,
+`v_assessment_trend`, reads only the base tables:
 
 ```
 v_enrollment_summary       one row per (student, subject)
@@ -136,16 +139,18 @@ v_enrollment_summary       one row per (student, subject)
 
 ### The frontend has no build step
 
-Open `frontend/index.html` and it runs. No npm, no bundler, no
-`node_modules`. Three ES modules do the work:
+Flask serves the pages as written, at http://localhost:5000 — they call
+the API on their own origin, so they are not opened from disk. No npm,
+no bundler, no `node_modules`. Three ES modules do the work:
 
 - **`api.js`** — the only file that knows about `fetch`, tokens and error
   shapes. Pages call `api.get(...)`.
 - **`ui.js`** — toasts, modals, formatting and safe DOM building.
 - **`charts.js`** — every chart, so styling rules are applied once.
 
-Styling is a token system: `tokens.css` declares every colour, space and
-radius, and nothing below it hardcodes a value.
+Styling is a token system: `tokens.css` declares the colours, spaces and
+radii the other stylesheets use, though a few colours, radii and sizes
+are still hard-coded.
 
 ---
 
@@ -165,7 +170,7 @@ functions.
 | `enrollments` | Student ↔ subject for an academic year |
 | `assessments` | Individual graded items (quiz / assignment / midterm / final) |
 | `attendance_records` | One row per class held |
-| `audit_log` | Who changed what, written by triggers |
+| `audit_log` | Who changed what, written by triggers, procedures and the API |
 | `login_attempts` | Durable brute-force record |
 
 ### Three design decisions worth explaining
@@ -191,6 +196,8 @@ colliding on a primary key.
 *Validation that cannot be bypassed* — `marks_obtained > max_marks` and
 future-dated assessments are rejected with `SIGNAL SQLSTATE '45000'` and
 a human-readable message the API passes straight through as a `400`.
+The date check runs on insert only, so an update can still move an
+assessment's date into the future.
 
 *Auditing the application cannot forget* — if the audit write lived in
 Python, any new code path that skipped it would create an untracked
@@ -222,16 +229,18 @@ Every point is explained:
 
 ```json
 {
-  "score": 64.0,
+  "score": 63.8,
   "band": "high",
   "reasons": [
     "Average of 20.0% is below the 40% pass mark",
     "Attendance of 40.5% is below the 75% requirement",
-    "Failing 5 subjects"
+    "Failing 5 subjects",
+    "In the bottom quartile of the class (percentile 4)"
   ],
   "recommendations": [
     "Book remedial sessions for the lowest-scoring subjects",
-    "Attendance is low enough to risk exam ineligibility - escalate to the mentor"
+    "Attendance is low enough to risk exam ineligibility - escalate to the mentor",
+    "Register for re-assessment in 5 subjects"
   ]
 }
 ```
@@ -239,28 +248,31 @@ Every point is explained:
 The same weights exist in **two places on purpose**: the SQL view
 (`v_at_risk_students`) scores whole cohorts in a set-based query, and
 `services/analytics.py` explains one student. A test asserts the two
-agree, so they cannot drift apart and make the dashboard contradict the
-report.
+agree at the default thresholds, so the weights cannot drift apart and
+make the dashboard contradict the report. The view hard-codes 40% and
+75%, though, so a different `PASS_PERCENT` or `MIN_ATTENDANCE_PERCENT`
+changes only the Python score.
 
-A student with no marks yet scores 0 in the `unknown` band rather than
+A student with no marks yet lands in the `unknown` band rather than
 looking like a top performer — `AVG` of nothing is `NULL`, and treating
-that as zero is a bug waiting to happen.
+that as zero is a bug waiting to happen. The explanation scores such a
+student 0, while the view's `risk_score` stays `NULL`.
 
 ---
 
 ## Security
 
-Every item below is covered by a test.
+Every item below except **Stored XSS** and **Secrets** is covered by a test.
 
 | Control | How |
 |---|---|
 | **Authentication** | Signed JWT carrying role and student id; a tampered claim fails verification |
-| **Authorisation** | Role decorator on every endpoint; three roles |
+| **Authorisation** | Role decorator on the 18 staff and admin endpoints, token check on 12 more; three roles |
 | **Object-level access** | Student id read from the token, never the URL; `require_self_or_staff` on every per-student route |
-| **Brute force** | 5 attempts per 5 minutes per user+IP, plus a durable `login_attempts` record |
+| **Brute force** | 5 attempts per 5 minutes per user+IP, counted in each server process, plus a durable `login_attempts` record |
 | **Password reset** | Requires username **and** the email on file; rate limited |
 | **SQL injection** | Every value parameterised; sort columns resolved through a whitelist |
-| **Stored XSS** | `textContent` throughout; `escapeHtml()` where a template is clearer |
+| **Stored XSS** | `textContent` throughout; no server value is ever parsed as HTML |
 | **Script injection** | Strict CSP with **no `unsafe-inline` in `script-src`** — injected script cannot execute. The one inline script (Swagger's bootstrap) carries a per-request nonce |
 | **Response caching** | `no-store` on every `/api/` response, so marks and credentials never reach the browser's disk cache |
 | **Secrets** | `.env`, gitignored, with `.env.example` as the template |
@@ -287,8 +299,10 @@ up the guarantee that a password cannot be read; auditing preserves the
 guarantee that it cannot be read *anonymously*. The audit row records
 that a lookup happened, never the secret.
 
-Switching to a salted hash is a one-function change in
-`backend/security.py`.
+Switching to a salted hash takes more than a change to
+`backend/security.py`: plain text is also written in `routes/admin.py`,
+`routes/auth.py` and `seed_demo.py`, and the credentials endpoint above
+reads it back, so that endpoint would have to go.
 
 ---
 
@@ -296,8 +310,9 @@ Switching to a salted hash is a one-function change in
 
 Interactive documentation: **http://localhost:5000/api/docs**
 
-36 endpoints. Everything except `/api/health` and `/api/auth/login`
-requires `Authorization: Bearer <token>`.
+36 endpoints. Everything except `/api/health`, `/api/auth/login`,
+`/api/auth/forgot-password`, `/api/auth/password-policy`, `/api/docs` and
+`/api/openapi.yaml` requires `Authorization: Bearer <token>`.
 
 ```
 POST   /api/auth/login                        exchange credentials for a JWT
@@ -345,7 +360,7 @@ cd Foresight/backend
 pytest
 ```
 
-**165 tests**, run against a real MySQL database rather than a mock.
+**173 tests**, run against a real MySQL database rather than a mock.
 That is deliberate: most of the logic worth testing lives in SQL — the
 views compute the percentages, the triggers reject bad marks. Mocking the
 database would assert that Python calls a query while never checking the
@@ -358,13 +373,14 @@ the tests too. It is dropped afterwards.
 | File | Covers |
 |---|---|
 | `test_auth.py` | Passwords, tokens, tampering, expiry, policy, rate limiting |
-| `test_authorization.py` | Every route × every role, object-level access, security headers |
+| `test_authorization.py` | Role checks on GET routes and some writes, object-level access, security headers |
 | `test_analytics.py` | Risk scoring, trends, and that SQL and Python agree |
 | `test_data_integrity.py` | Triggers, constraints, CSV import, timestamps, injection |
 
-CI runs the suite plus `ruff` on every push, and separately loads all
-five SQL files into a clean MySQL to verify every view, trigger and
-procedure still creates.
+CI runs the suite plus `ruff` on pushes to `main` and `Student-Analytics`,
+on pull requests and on manual runs, and separately loads all five SQL
+files into a clean MySQL to verify every view, trigger and procedure
+still creates.
 
 ---
 
@@ -385,7 +401,7 @@ Foresight/
 │   ├── seed_demo.py         demo dataset generator
 │   ├── routes/              HTTP layer (6 blueprints)
 │   ├── services/            business logic (analytics, imports, reports)
-│   └── tests/               165 tests
+│   └── tests/               173 tests
 │
 ├── database/
 │   ├── schema.sql           tables, constraints, indexes
